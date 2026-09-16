@@ -447,6 +447,9 @@ if veri_hazir:
                 </table>
                 </div>
                 """
+                # Markdown, satır başındaki 4+ boşluğu kod bloğu sanıp HTML'i düz metin olarak
+                # gösterebiliyor - bunu önlemek için her satırın baş boşluğunu temizliyoruz.
+                tablo_html = "\n".join(satir.strip() for satir in tablo_html.split("\n"))
                 st.markdown(tablo_html, unsafe_allow_html=True)
 
                 st.subheader("İşlem detayı")
