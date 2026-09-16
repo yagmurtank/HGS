@@ -174,7 +174,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
         gecis_noktasi = h.get("gecis_noktasi", "Bilinmiyor")
         temel = {"islem_id": h.get("islem_id", f"HGS-{i}"), "operator": operator, "gecis_noktasi": gecis_noktasi,
                  "hgs_tutar": h["tutar"], "banka_tutar": None,
-                 "hgs_tarih": h["gecis_tarihi"], "banka_tarih": None, "tutar_farki_tl": 0.0}
+                 "hgs_tarih": h["gecis_tarihi"].strftime("%Y-%m-%d %H:%M"), "banka_tarih": None, "tutar_farki_tl": 0.0}
 
         if not adaylar:
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "EKSIK_KAYIT",
@@ -189,7 +189,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
         tutar_farki = round(abs(h["tutar"] - b["tutar"]), 2)
         tarih_farki_saat = abs((h["gecis_tarihi"] - b["gecis_tarihi"]).total_seconds()) / 3600
 
-        ortak = {**temel, "banka_tutar": b["tutar"], "banka_tarih": b["gecis_tarihi"]}
+        ortak = {**temel, "banka_tutar": b["tutar"], "banka_tarih": b["gecis_tarihi"].strftime("%Y-%m-%d %H:%M")}
 
         if tutar_farki > tutar_toleransi:
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "TUTAR_FARKI",
@@ -208,7 +208,8 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
             sonuclar.append({
                 "islem_id": b.get("islem_id", f"BANKA-{idx}"), "operator": b.get("operator", "Bilinmiyor"),
                 "gecis_noktasi": b.get("gecis_noktasi", "Bilinmiyor"),
-                "hgs_tutar": None, "banka_tutar": b["tutar"], "hgs_tarih": None, "banka_tarih": b["gecis_tarihi"],
+                "hgs_tutar": None, "banka_tutar": b["tutar"], "hgs_tarih": None,
+                "banka_tarih": b["gecis_tarihi"].strftime("%Y-%m-%d %H:%M"),
                 "tutar_farki_tl": 0.0, "durum": "UYUSMUYOR", "hata_tipi": "HGS_TARAFINDA_YOK",
                 "detay": f"'{b['plaka']}' plakasına ait bu kayda HGS tarafında karşılık bulunamadı",
             })
