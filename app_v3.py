@@ -11,6 +11,7 @@ v3 yenilikleri:
 
 import streamlit as st
 import pandas as pd
+import html as html_lib
 from io import BytesIO
 
 st.set_page_config(page_title="HGS Mutabakat Otomasyonu", layout="wide", page_icon="🚗")
@@ -408,18 +409,45 @@ if veri_hazir:
             if len(filtreli_df) > 0:
                 goruntu_df = filtreli_df.copy()
                 goruntu_df["hata tipi"] = goruntu_df["hata_tipi"].map(lambda x: HATA_ETIKETLERI.get(x, x))
-                st.dataframe(
-                    goruntu_df[["islem_id", "hata tipi", "operator", "gecis_noktasi", "detay"]],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "islem_id": st.column_config.TextColumn("İşlem ID", width="small"),
-                        "hata tipi": st.column_config.TextColumn("Hata tipi", width="small"),
-                        "operator": st.column_config.TextColumn("Operatör", width="small"),
-                        "gecis_noktasi": st.column_config.TextColumn("Geçiş noktası", width="medium"),
-                        "detay": st.column_config.TextColumn("Detay", width="large"),
-                    },
-                )
+
+                # st.dataframe uzun metinleri kırptığı ve kullanıcının manuel genişletmesini
+                # gerektirdiği için, burada satırı asla kesmeyen kendi HTML tablomuzu kullanıyoruz.
+                satirlar_html = ""
+                for _, r in goruntu_df.iterrows():
+                    islem_id_g = html_lib.escape(str(r['islem_id']))
+                    hata_tipi_g = html_lib.escape(str(r['hata tipi']))
+                    operator_g = html_lib.escape(str(r['operator']))
+                    nokta_g = html_lib.escape(str(r['gecis_noktasi']))
+                    detay_g = html_lib.escape(str(r['detay']))
+                    satirlar_html += f"""
+                    <tr>
+                        <td style="padding:8px 10px; border-bottom:1px solid #E5E5E5; white-space:nowrap;">{islem_id_g}</td>
+                        <td style="padding:8px 10px; border-bottom:1px solid #E5E5E5; white-space:nowrap;">{hata_tipi_g}</td>
+                        <td style="padding:8px 10px; border-bottom:1px solid #E5E5E5; white-space:nowrap;">{operator_g}</td>
+                        <td style="padding:8px 10px; border-bottom:1px solid #E5E5E5; white-space:nowrap;">{nokta_g}</td>
+                        <td style="padding:8px 10px; border-bottom:1px solid #E5E5E5; white-space:normal; word-wrap:break-word;">{detay_g}</td>
+                    </tr>
+                    """
+
+                tablo_html = f"""
+                <div style="max-height:480px; overflow-y:auto; border:1px solid #E5E5E5; border-radius:6px;">
+                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                    <thead style="position:sticky; top:0; background-color:#FAFAFA;">
+                        <tr>
+                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">İşlem ID</th>
+                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">Hata tipi</th>
+                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">Operatör</th>
+                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">Geçiş noktası</th>
+                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; width:40%;">Detay</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {satirlar_html}
+                    </tbody>
+                </table>
+                </div>
+                """
+                st.markdown(tablo_html, unsafe_allow_html=True)
 
                 st.subheader("İşlem detayı")
                 secili_islem = st.selectbox("İncelemek istediğin işlem ID'sini seç", filtreli_df["islem_id"])
