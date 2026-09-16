@@ -411,6 +411,13 @@ if veri_hazir:
                     goruntu_df[["islem_id", "hata tipi", "operator", "gecis_noktasi", "detay"]],
                     use_container_width=True,
                     hide_index=True,
+                    column_config={
+                        "islem_id": st.column_config.TextColumn("İşlem ID", width="small"),
+                        "hata tipi": st.column_config.TextColumn("Hata tipi", width="small"),
+                        "operator": st.column_config.TextColumn("Operatör", width="small"),
+                        "gecis_noktasi": st.column_config.TextColumn("Geçiş noktası", width="medium"),
+                        "detay": st.column_config.TextColumn("Detay", width="large"),
+                    },
                 )
 
                 st.subheader("İşlem detayı")
