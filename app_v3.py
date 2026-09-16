@@ -147,6 +147,75 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
     return pd.DataFrame(sonuclar)
 
 
+def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
+                         tutar_toleransi: float = TUTAR_TOLERANS,
+                         tarih_toleransi_saat: float = TARIH_TOLERANS_SAAT) -> pd.DataFrame:
+    """
+    İşlem ID'nin iki sistemde de ortak/güvenilir olmadığı gerçek dünya senaryoları için:
+    plaka + geçiş tarihi + tutar üzerinden en yakın eşleşmeyi bulan yaklaşık mutabakat motoru.
+    Her HGS kaydı için aynı plakaya sahip, henüz kullanılmamış en yakın tarihli banka kaydı aranır.
+    """
+    hgs = hgs.copy()
+    banka = banka.copy()
+    hgs["gecis_tarihi"] = pd.to_datetime(hgs["gecis_tarihi"])
+    banka["gecis_tarihi"] = pd.to_datetime(banka["gecis_tarihi"])
+
+    banka_kullanildi = [False] * len(banka)
+    banka_by_plaka = {}
+    for idx, row in banka.iterrows():
+        banka_by_plaka.setdefault(row["plaka"], []).append(idx)
+
+    sonuclar = []
+
+    for i, h in hgs.iterrows():
+        adaylar = [idx for idx in banka_by_plaka.get(h["plaka"], []) if not banka_kullanildi[idx]]
+
+        operator = h.get("operator", "Bilinmiyor")
+        gecis_noktasi = h.get("gecis_noktasi", "Bilinmiyor")
+        temel = {"islem_id": h.get("islem_id", f"HGS-{i}"), "operator": operator, "gecis_noktasi": gecis_noktasi,
+                 "hgs_tutar": h["tutar"], "banka_tutar": None,
+                 "hgs_tarih": h["gecis_tarihi"], "banka_tarih": None, "tutar_farki_tl": 0.0}
+
+        if not adaylar:
+            sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "EKSIK_KAYIT",
+                              "detay": f"'{h['plaka']}' plakasına ait kayıt bankada bulunamadı"})
+            continue
+
+        # Aynı plakadaki adaylar arasından tarihçe en yakın olanı seç
+        en_yakin_idx = min(adaylar, key=lambda idx: abs((banka.loc[idx, "gecis_tarihi"] - h["gecis_tarihi"]).total_seconds()))
+        b = banka.loc[en_yakin_idx]
+        banka_kullanildi[en_yakin_idx] = True
+
+        tutar_farki = round(abs(h["tutar"] - b["tutar"]), 2)
+        tarih_farki_saat = abs((h["gecis_tarihi"] - b["gecis_tarihi"]).total_seconds()) / 3600
+
+        ortak = {**temel, "banka_tutar": b["tutar"], "banka_tarih": b["gecis_tarihi"]}
+
+        if tutar_farki > tutar_toleransi:
+            sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "TUTAR_FARKI",
+                              "detay": f"HGS: {h['tutar']} TL, Banka: {b['tutar']} TL (fark: {tutar_farki} TL) — plaka+tarih ile eşleştirildi",
+                              "tutar_farki_tl": tutar_farki})
+        elif tarih_farki_saat > tarih_toleransi_saat:
+            sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "GECIKMELI_BILDIRIM",
+                              "detay": f"Fark: {tarih_farki_saat:.1f} saat — plaka+tarih ile eşleştirildi"})
+        else:
+            sonuclar.append({**ortak, "durum": "UYUSTU", "hata_tipi": "-", "detay": "Plaka+tarih ile eşleştirildi"})
+
+    # Bankada kalıp hiç kullanılmayan kayıtlar: HGS'de karşılığı bulunamamış demektir
+    for idx, kullanildi in enumerate(banka_kullanildi):
+        if not kullanildi:
+            b = banka.loc[idx]
+            sonuclar.append({
+                "islem_id": b.get("islem_id", f"BANKA-{idx}"), "operator": b.get("operator", "Bilinmiyor"),
+                "gecis_noktasi": b.get("gecis_noktasi", "Bilinmiyor"),
+                "hgs_tutar": None, "banka_tutar": b["tutar"], "hgs_tarih": None, "banka_tarih": b["gecis_tarihi"],
+                "tutar_farki_tl": 0.0, "durum": "UYUSMUYOR", "hata_tipi": "HGS_TARAFINDA_YOK",
+                "detay": f"'{b['plaka']}' plakasına ait bu kayda HGS tarafında karşılık bulunamadı",
+            })
+
+    return pd.DataFrame(sonuclar)
+
+
 def rozet_html(hata_tipi: str) -> str:
     renk = HATA_RENKLERI.get(hata_tipi, "#7A7A7A")
     yazi_renk = HATA_YAZI_RENKLERI.get(hata_tipi, "#FFFFFF")
@@ -243,6 +312,15 @@ with st.sidebar:
         st.session_state.ornek_veri_aktif = False
 
     st.divider()
+    st.header("Eşleştirme yöntemi")
+    eslestirme_yontemi = st.radio(
+        "Kayıtlar hangi bilgiyle eşleştirilsin?",
+        ["İşlem ID (birebir)", "Plaka + Tarih + Tutar (yaklaşık)"],
+        help="İki sistemde ortak/güvenilir bir işlem ID yoksa 'yaklaşık' modu kullan — "
+             "plaka ve en yakın geçiş zamanına göre eşleştirme yapar.",
+    )
+
+    st.divider()
     st.header("Eşik ayarları")
     tutar_toleransi = st.slider("Tutar farkı toleransı (TL)", 0.0, 10.0, 0.01, 0.5,
                                  help="Bu tutarın üzerindeki farklar 'uyuşmuyor' sayılır")
@@ -261,7 +339,11 @@ else:
     veri_hazir = False
 
 if veri_hazir:
-    gerekli_kolonlar = {"islem_id", "gecis_tarihi", "tutar"}
+    if eslestirme_yontemi.startswith("İşlem ID"):
+        gerekli_kolonlar = {"islem_id", "gecis_tarihi", "tutar"}
+    else:
+        gerekli_kolonlar = {"plaka", "gecis_tarihi", "tutar"}
+
     eksik_hgs = gerekli_kolonlar - set(hgs_df.columns)
     eksik_banka = gerekli_kolonlar - set(banka_df.columns)
 
@@ -272,7 +354,10 @@ if veri_hazir:
         )
     else:
         with st.spinner("Mutabakat yapılıyor..."):
-            sonuc_df = mutabakat_yap(hgs_df, banka_df, tutar_toleransi, tarih_toleransi)
+            if eslestirme_yontemi.startswith("İşlem ID"):
+                sonuc_df = mutabakat_yap(hgs_df, banka_df, tutar_toleransi, tarih_toleransi)
+            else:
+                sonuc_df = esnek_mutabakat_yap(hgs_df, banka_df, tutar_toleransi, tarih_toleransi)
 
         toplam = len(sonuc_df)
         uyusan = int((sonuc_df["durum"] == "UYUSTU").sum())
