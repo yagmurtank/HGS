@@ -106,8 +106,9 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
         ref = hgs_satir.iloc[0] if len(hgs_satir) > 0 else banka_gruplu.get_group(islem_id).iloc[0]
         operator = ref.get("operator", "Bilinmiyor")
         gecis_noktasi = ref.get("gecis_noktasi", "Bilinmiyor")
+        plaka = ref.get("plaka", "Bilinmiyor")
 
-        temel = {"islem_id": islem_id, "operator": operator, "gecis_noktasi": gecis_noktasi,
+        temel = {"islem_id": islem_id, "operator": operator, "gecis_noktasi": gecis_noktasi, "plaka": plaka,
                  "hgs_tutar": None, "banka_tutar": None, "hgs_tarih": None, "banka_tarih": None,
                  "tutar_farki_tl": 0.0}
 
@@ -174,7 +175,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
         operator = h.get("operator", "Bilinmiyor")
         gecis_noktasi = h.get("gecis_noktasi", "Bilinmiyor")
         temel = {"islem_id": h.get("islem_id", f"HGS-{i}"), "operator": operator, "gecis_noktasi": gecis_noktasi,
-                 "hgs_tutar": h["tutar"], "banka_tutar": None,
+                 "plaka": h["plaka"], "hgs_tutar": h["tutar"], "banka_tutar": None,
                  "hgs_tarih": h["gecis_tarihi"].strftime("%Y-%m-%d %H:%M"), "banka_tarih": None, "tutar_farki_tl": 0.0}
 
         if not adaylar:
@@ -208,7 +209,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
             b = banka.loc[idx]
             sonuclar.append({
                 "islem_id": b.get("islem_id", f"BANKA-{idx}"), "operator": b.get("operator", "Bilinmiyor"),
-                "gecis_noktasi": b.get("gecis_noktasi", "Bilinmiyor"),
+                "gecis_noktasi": b.get("gecis_noktasi", "Bilinmiyor"), "plaka": b["plaka"],
                 "hgs_tutar": None, "banka_tutar": b["tutar"], "hgs_tarih": None,
                 "banka_tarih": b["gecis_tarihi"].strftime("%Y-%m-%d %H:%M"),
                 "tutar_farki_tl": 0.0, "durum": "UYUSMUYOR", "hata_tipi": "HGS_TARAFINDA_YOK",
@@ -223,6 +224,40 @@ def rozet_html(hata_tipi: str) -> str:
     yazi_renk = HATA_YAZI_RENKLERI.get(hata_tipi, "#FFFFFF")
     etiket = HATA_ETIKETLERI.get(hata_tipi, hata_tipi)
     return f'<span class="rozet" style="background-color:{renk}; color:{yazi_renk}">{etiket}</span>'
+
+
+def anomali_tespit_et(sonuc_df: pd.DataFrame, z_esik: float = 2.5, gunluk_esik: int = 5):
+    """
+    Uyuşan kayıtlar dahil TÜM işlemler içinde istatistiksel olarak sıra dışı olanları bulur.
+    Mutabakat hatası olmasa bile şüpheli örüntüleri (fraud/hata ihtimali) yakalamak içindir.
+
+    1) Tutar anomalisi: işlem tutarı, genel ortalamadan z_esik standart sapmadan fazla uzaksa işaretlenir.
+    2) Sık geçiş anomalisi: bir plaka aynı gün içinde gunluk_esik'ten fazla geçiş yapmışsa işaretlenir.
+    """
+    df = sonuc_df.copy()
+    df["tutar"] = df["hgs_tutar"].fillna(df["banka_tutar"])
+    df["tarih"] = pd.to_datetime(df["hgs_tarih"].fillna(df["banka_tarih"]), errors="coerce")
+
+    # --- Tutar anomalisi (z-score) ---
+    tutar_anomali_df = pd.DataFrame()
+    gecerli = df.dropna(subset=["tutar"])
+    if len(gecerli) > 1 and gecerli["tutar"].std() > 0:
+        ortalama = gecerli["tutar"].mean()
+        std = gecerli["tutar"].std()
+        df["z_skor"] = (df["tutar"] - ortalama) / std
+        tutar_anomali_df = df[df["z_skor"].abs() > z_esik][
+            ["islem_id", "plaka", "operator", "gecis_noktasi", "tutar", "z_skor", "durum"]
+        ].copy()
+        tutar_anomali_df["z_skor"] = tutar_anomali_df["z_skor"].round(2)
+        tutar_anomali_df = tutar_anomali_df.sort_values("z_skor", key=abs, ascending=False)
+
+    # --- Sık geçiş anomalisi (plaka + gün bazında sayım) ---
+    df_gun = df.dropna(subset=["tarih", "plaka"]).copy()
+    df_gun["gun"] = df_gun["tarih"].dt.date
+    sayim = df_gun.groupby(["plaka", "gun"]).size().reset_index(name="gecis_sayisi")
+    siklik_anomali_df = sayim[sayim["gecis_sayisi"] > gunluk_esik].sort_values("gecis_sayisi", ascending=False)
+
+    return tutar_anomali_df, siklik_anomali_df
 
 
 def excel_raporu_uret(sonuc_df: pd.DataFrame) -> bytes:
@@ -375,7 +410,9 @@ if veri_hazir:
 
         st.divider()
 
-        sekme1, sekme2, sekme3 = st.tabs(["📊 Genel bakış", "📈 Zaman trendi", "🏷️ Operatör / nokta kırılımı"])
+        sekme1, sekme2, sekme3, sekme4 = st.tabs(
+            ["📊 Genel bakış", "📈 Zaman trendi", "🏷️ Operatör / nokta kırılımı", "🚨 Anomali tespiti"]
+        )
 
         with sekme1:
             st.subheader("Hata tipi dağılımı")
@@ -496,6 +533,49 @@ if veri_hazir:
                 st.bar_chart(nokta_kirilim, color="#F5B301")
             else:
                 st.info("Geçiş noktası bilgisi bulunamadı.")
+
+        with sekme4:
+            st.caption(
+                "Bu sekme sadece uyuşmayan kayıtları değil, **uyuşan kayıtlar dahil tüm işlemleri** "
+                "istatistiksel olarak inceler — mutabakat açısından 'doğru' görünse bile normalden "
+                "sapan (olası hata veya usulsüzlük işareti taşıyan) kayıtları yakalamak içindir."
+            )
+
+            ac1, ac2 = st.columns(2)
+            with ac1:
+                z_esik = st.slider("Tutar anomalisi hassasiyeti (z-skor eşiği)", 1.0, 4.0, 2.5, 0.1,
+                                    help="Düşük değer = daha fazla (ama daha ufak) sapma yakalar")
+            with ac2:
+                gunluk_esik = st.slider("Aynı plakadan günlük geçiş eşiği", 2, 20, 5, 1,
+                                         help="Bir plaka bir günde bu sayıdan fazla geçiş yaparsa işaretlenir")
+
+            tutar_anomali_df, siklik_anomali_df = anomali_tespit_et(sonuc_df, z_esik, gunluk_esik)
+
+            st.markdown("#### 💰 Tutar anomalileri")
+            if len(tutar_anomali_df) > 0:
+                st.caption(f"{len(tutar_anomali_df)} işlem, ortalamadan {z_esik} standart sapmadan fazla uzakta.")
+                st.dataframe(
+                    tutar_anomali_df.rename(columns={
+                        "islem_id": "İşlem ID", "plaka": "Plaka", "operator": "Operatör",
+                        "gecis_noktasi": "Geçiş noktası", "tutar": "Tutar (TL)",
+                        "z_skor": "Z-skor", "durum": "Mutabakat durumu",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.info("Bu eşikte tutar anomalisi bulunamadı.")
+
+            st.markdown("#### 🔁 Sık geçiş anomalileri")
+            if len(siklik_anomali_df) > 0:
+                st.caption(f"{len(siklik_anomali_df)} plaka-gün kombinasyonu, günlük eşiğin üzerinde geçiş yapmış.")
+                st.dataframe(
+                    siklik_anomali_df.rename(columns={
+                        "plaka": "Plaka", "gun": "Tarih", "gecis_sayisi": "Geçiş sayısı",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.info("Bu eşikte sık geçiş anomalisi bulunamadı.")
 
         st.divider()
         c1, c2 = st.columns(2)
