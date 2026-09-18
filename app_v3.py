@@ -14,7 +14,7 @@ import pandas as pd
 import html as html_lib
 from io import BytesIO
 
-st.set_page_config(page_title="HGS Mutabakat Otomasyonu", layout="wide", page_icon="🚗")
+st.set_page_config(page_title="Mutabakat Otomasyonu", layout="wide", page_icon="🔄")
 
 TUTAR_TOLERANS = 0.01
 TARIH_TOLERANS_SAAT = 2
@@ -40,7 +40,7 @@ HATA_ETIKETLERI = {
     "GECIKMELI_BILDIRIM": "Gecikmeli bildirim",
     "EKSIK_KAYIT": "Eksik kayıt",
     "MUKERRER_KAYIT": "Mükerrer kayıt",
-    "HGS_TARAFINDA_YOK": "HGS tarafında yok",
+    "HGS_TARAFINDA_YOK": "Karşı tarafta yok",
 }
 
 st.markdown(
@@ -180,7 +180,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
 
         if not adaylar:
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "EKSIK_KAYIT",
-                              "detay": f"'{h['plaka']}' plakasına ait kayıt bankada bulunamadı"})
+                              "detay": f"'{h['plaka']}' değerine ait kayıt karşı tarafta bulunamadı"})
             continue
 
         # Aynı plakadaki adaylar arasından tarihçe en yakın olanı seç
@@ -213,7 +213,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
                 "hgs_tutar": None, "banka_tutar": b["tutar"], "hgs_tarih": None,
                 "banka_tarih": b["gecis_tarihi"].strftime("%Y-%m-%d %H:%M"),
                 "tutar_farki_tl": 0.0, "durum": "UYUSMUYOR", "hata_tipi": "HGS_TARAFINDA_YOK",
-                "detay": f"'{b['plaka']}' plakasına ait bu kayda HGS tarafında karşılık bulunamadı",
+                "detay": f"'{b['plaka']}' değerine ait bu kayda diğer tarafta karşılık bulunamadı",
             })
 
     return pd.DataFrame(sonuclar)
@@ -293,23 +293,34 @@ def excel_raporu_uret(sonuc_df: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
-def ornek_veri_uret():
-    """Kullanıcı kendi dosyası olmadan uygulamayı denemek isterse küçük bir örnek veri seti üretir."""
+def ornek_veri_uret(mod: str = "hgs"):
+    """Kullanıcı kendi dosyası olmadan uygulamayı denemek isterse küçük bir örnek veri seti üretir.
+    Çıktı her zaman kanonik kolon isimleriyle (islem_id, plaka, gecis_tarihi, tutar, gecis_noktasi, operator)
+    döner - 'plaka' HGS modunda plaka, POS modunda maskeli kart no anlamına gelir."""
     import random
     from datetime import datetime, timedelta
 
     random.seed(7)
     baslangic = datetime(2026, 9, 1)
-    noktalar = ["Kavacık G.", "Zincirlikuyu G.", "Fatih SM G.", "TEM Otoyol G."]
-    operatorler = ["HGS-A", "HGS-B", "HGS-C"]
+
+    if mod == "pos":
+        noktalar = ["Migros Kadıköy", "CarrefourSA Ataşehir", "Boyner Nişantaşı", "Opet Maslak"]
+        operatorler = ["POS-Param", "POS-PayTR", "POS-VakıfPOS"]
+        anahtar_uret = lambda i: f"{4000+i:04d} **** **** {1000+i:04d}"
+        tutar_secenekleri = [24.90, 49.50, 89.00, 149.90]
+    else:
+        noktalar = ["Kavacık G.", "Zincirlikuyu G.", "Fatih SM G.", "TEM Otoyol G."]
+        operatorler = ["HGS-A", "HGS-B", "HGS-C"]
+        anahtar_uret = lambda i: f"34 AB {1000+i}"
+        tutar_secenekleri = [13.25, 17.50, 22.00, 35.75]
 
     hgs_kayitlar, banka_kayitlar = [], []
     for i in range(1, 121):
         islem_id = f"TX{i:05d}"
         tarih = baslangic + timedelta(days=random.randint(0, 9), hours=random.randint(0, 23))
-        tutar = round(random.choice([13.25, 17.50, 22.00, 35.75]), 2)
+        tutar = round(random.choice(tutar_secenekleri), 2)
         kayit = {
-            "islem_id": islem_id, "plaka": f"34 AB {1000+i}",
+            "islem_id": islem_id, "plaka": anahtar_uret(i),
             "gecis_tarihi": tarih.strftime("%Y-%m-%d %H:%M"), "tutar": tutar,
             "gecis_noktasi": random.choice(noktalar), "operator": random.choice(operatorler),
         }
@@ -330,18 +341,60 @@ def ornek_veri_uret():
     return pd.DataFrame(hgs_kayitlar), pd.DataFrame(banka_kayitlar)
 
 
-st.title("HGS Mutabakat Otomasyonu")
+MOD_BILGI = {
+    "hgs": {
+        "icon": "🚗",
+        "baslik": "HGS Mutabakat Otomasyonu",
+        "aciklama": "HGS ve banka tahsilat kayıtlarını yükle, otomatik eşleştirme ve hata sınıflandırması yap.",
+        "kaynak1_etiket": "HGS kayıtları (CSV)",
+        "kaynak2_etiket": "Banka kayıtları (CSV)",
+        "beklenen_kolonlar_metni": "islem_id, plaka, gecis_tarihi, tutar, gecis_noktasi, operator",
+        "kolon_eslestirme": {"islem_id": "islem_id", "plaka": "plaka", "gecis_tarihi": "gecis_tarihi",
+                              "tutar": "tutar", "gecis_noktasi": "gecis_noktasi", "operator": "operator"},
+        "anahtar_terim": "Plaka", "nokta_terim": "Geçiş noktası", "operator_terim": "Operatör",
+        "esnek_yontem_adi": "Plaka + Tarih + Tutar (yaklaşık)",
+        "eksik_kayit_aciklama": "plakasına ait kayıt bankada bulunamadı",
+        "hgs_tarafinda_yok_aciklama": "plakasına ait bu kayda HGS tarafında karşılık bulunamadı",
+    },
+    "pos": {
+        "icon": "💳",
+        "baslik": "POS Kart İşlemleri Mutabakat Otomasyonu",
+        "aciklama": "POS kayıtlarını ve banka hesap hareketlerini yükle, otomatik eşleştirme ve hata sınıflandırması yap.",
+        "kaynak1_etiket": "POS kayıtları (CSV)",
+        "kaynak2_etiket": "Banka hesap hareketleri (CSV)",
+        "beklenen_kolonlar_metni": "islem_id, kart_no, islem_tarihi, tutar, isyeri, pos_saglayici",
+        "kolon_eslestirme": {"islem_id": "islem_id", "kart_no": "plaka", "islem_tarihi": "gecis_tarihi",
+                              "tutar": "tutar", "isyeri": "gecis_noktasi", "pos_saglayici": "operator"},
+        "anahtar_terim": "Kart No", "nokta_terim": "İşyeri", "operator_terim": "POS Sağlayıcı",
+        "esnek_yontem_adi": "Kart No + Tarih + Tutar (yaklaşık)",
+        "eksik_kayit_aciklama": "kartına ait kayıt banka hesap hareketlerinde bulunamadı",
+        "hgs_tarafinda_yok_aciklama": "kartına ait bu kayda POS tarafında karşılık bulunamadı",
+    },
+}
+
+
+
+mod = st.radio(
+    "Mutabakat türü",
+    ["hgs", "pos"],
+    format_func=lambda x: "🚗 HGS Geçişleri" if x == "hgs" else "💳 POS Kart İşlemleri",
+    horizontal=True,
+    label_visibility="collapsed",
+)
+M = MOD_BILGI[mod]
+
+st.title(M["baslik"])
 st.markdown('<div class="baslik-seridi"></div>', unsafe_allow_html=True)
-st.caption("HGS ve banka tahsilat kayıtlarını yükle, otomatik eşleştirme ve hata sınıflandırması yap.")
+st.caption(M["aciklama"])
 
 if "ornek_veri_aktif" not in st.session_state:
     st.session_state.ornek_veri_aktif = False
 
 with st.sidebar:
     st.header("Veri yükle")
-    hgs_dosya = st.file_uploader("HGS kayıtları (CSV)", type="csv", key="hgs")
-    banka_dosya = st.file_uploader("Banka kayıtları (CSV)", type="csv", key="banka")
-    st.caption("Beklenen kolonlar: islem_id, plaka, gecis_tarihi, tutar, gecis_noktasi, operator")
+    hgs_dosya = st.file_uploader(M["kaynak1_etiket"], type="csv", key=f"hgs_{mod}")
+    banka_dosya = st.file_uploader(M["kaynak2_etiket"], type="csv", key=f"banka_{mod}")
+    st.caption(f"Beklenen kolonlar: {M['beklenen_kolonlar_metni']}")
 
     if st.button("🎲 Örnek veriyle dene"):
         st.session_state.ornek_veri_aktif = True
@@ -352,9 +405,9 @@ with st.sidebar:
     st.header("Eşleştirme yöntemi")
     eslestirme_yontemi = st.radio(
         "Kayıtlar hangi bilgiyle eşleştirilsin?",
-        ["İşlem ID (birebir)", "Plaka + Tarih + Tutar (yaklaşık)"],
-        help="İki sistemde ortak/güvenilir bir işlem ID yoksa 'yaklaşık' modu kullan — "
-             "plaka ve en yakın geçiş zamanına göre eşleştirme yapar.",
+        ["İşlem ID (birebir)", M["esnek_yontem_adi"]],
+        help=f"İki sistemde ortak/güvenilir bir işlem ID yoksa 'yaklaşık' modu kullan — "
+             f"{M['anahtar_terim'].lower()} ve en yakın zamana göre eşleştirme yapar.",
     )
 
     st.divider()
@@ -365,12 +418,12 @@ with st.sidebar:
                                  help="Bu süreden uzun gecikmeler 'uyuşmuyor' sayılır")
 
 if st.session_state.ornek_veri_aktif and not (hgs_dosya and banka_dosya):
-    hgs_df, banka_df = ornek_veri_uret()
+    hgs_df, banka_df = ornek_veri_uret(mod)
     st.info("Örnek veriyle çalışıyorsun. Kendi dosyalarını yüklemek için sol menüyü kullan.")
     veri_hazir = True
 elif hgs_dosya and banka_dosya:
-    hgs_df = pd.read_csv(hgs_dosya)
-    banka_df = pd.read_csv(banka_dosya)
+    hgs_df = pd.read_csv(hgs_dosya).rename(columns=M["kolon_eslestirme"])
+    banka_df = pd.read_csv(banka_dosya).rename(columns=M["kolon_eslestirme"])
     veri_hazir = True
 else:
     veri_hazir = False
@@ -473,8 +526,8 @@ if veri_hazir:
                         <tr>
                             <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">İşlem ID</th>
                             <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">Hata tipi</th>
-                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">Operatör</th>
-                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">Geçiş noktası</th>
+                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">{M["operator_terim"]}</th>
+                            <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; white-space:nowrap;">{M["nokta_terim"]}</th>
                             <th style="text-align:left; padding:8px 10px; border-bottom:2px solid #1A1A1A; width:40%;">Detay</th>
                         </tr>
                     </thead>
@@ -498,7 +551,7 @@ if veri_hazir:
                 with d1:
                     st.markdown(f"**İşlem ID:** {detay['islem_id']}")
                     st.markdown(f"**Durum:** {rozet_html(detay['hata_tipi'])}", unsafe_allow_html=True)
-                    st.markdown(f"**Operatör:** {detay['operator']} — **Nokta:** {detay['gecis_noktasi']}")
+                    st.markdown(f"**{M['operator_terim']}:** {detay['operator']} — **{M['nokta_terim']}:** {detay['gecis_noktasi']}")
                 with d2:
                     if pd.notna(detay.get("hgs_tutar")):
                         st.markdown(f"**HGS tutar / tarih:** {detay['hgs_tutar']} TL — {detay['hgs_tarih']}")
@@ -520,19 +573,19 @@ if veri_hazir:
                 st.info("Trend çizmek için tarih bilgisi bulunamadı.")
 
         with sekme3:
-            st.subheader("Operatör bazında uyuşmazlık")
+            st.subheader(f"{M['operator_terim']} bazında uyuşmazlık")
             op_kirilim = sonuc_df[sonuc_df["durum"] == "UYUSMUYOR"]["operator"].value_counts()
             if len(op_kirilim) > 0:
                 st.bar_chart(op_kirilim, color="#1A1A1A")
             else:
-                st.info("Operatör bilgisi bulunamadı.")
+                st.info(f"{M['operator_terim']} bilgisi bulunamadı.")
 
-            st.subheader("Geçiş noktası bazında uyuşmazlık")
+            st.subheader(f"{M['nokta_terim']} bazında uyuşmazlık")
             nokta_kirilim = sonuc_df[sonuc_df["durum"] == "UYUSMUYOR"]["gecis_noktasi"].value_counts()
             if len(nokta_kirilim) > 0:
                 st.bar_chart(nokta_kirilim, color="#F5B301")
             else:
-                st.info("Geçiş noktası bilgisi bulunamadı.")
+                st.info(f"{M['nokta_terim']} bilgisi bulunamadı.")
 
         with sekme4:
             st.caption(
@@ -546,8 +599,9 @@ if veri_hazir:
                 z_esik = st.slider("Tutar anomalisi hassasiyeti (z-skor eşiği)", 1.0, 4.0, 2.5, 0.1,
                                     help="Düşük değer = daha fazla (ama daha ufak) sapma yakalar")
             with ac2:
-                gunluk_esik = st.slider("Aynı plakadan günlük geçiş eşiği", 2, 20, 5, 1,
-                                         help="Bir plaka bir günde bu sayıdan fazla geçiş yaparsa işaretlenir")
+                gunluk_esik = st.slider(f"Aynı {M['anahtar_terim'].lower()}dan günlük geçiş eşiği", 2, 20, 5, 1,
+                                         help=f"Bir {M['anahtar_terim'].lower()} bir günde bu sayıdan fazla "
+                                              f"geçiş/işlem yaparsa işaretlenir")
 
             tutar_anomali_df, siklik_anomali_df = anomali_tespit_et(sonuc_df, z_esik, gunluk_esik)
 
@@ -556,8 +610,8 @@ if veri_hazir:
                 st.caption(f"{len(tutar_anomali_df)} işlem, ortalamadan {z_esik} standart sapmadan fazla uzakta.")
                 st.dataframe(
                     tutar_anomali_df.rename(columns={
-                        "islem_id": "İşlem ID", "plaka": "Plaka", "operator": "Operatör",
-                        "gecis_noktasi": "Geçiş noktası", "tutar": "Tutar (TL)",
+                        "islem_id": "İşlem ID", "plaka": M["anahtar_terim"], "operator": M["operator_terim"],
+                        "gecis_noktasi": M["nokta_terim"], "tutar": "Tutar (TL)",
                         "z_skor": "Z-skor", "durum": "Mutabakat durumu",
                     }),
                     use_container_width=True, hide_index=True,
@@ -567,10 +621,10 @@ if veri_hazir:
 
             st.markdown("#### 🔁 Sık geçiş anomalileri")
             if len(siklik_anomali_df) > 0:
-                st.caption(f"{len(siklik_anomali_df)} plaka-gün kombinasyonu, günlük eşiğin üzerinde geçiş yapmış.")
+                st.caption(f"{len(siklik_anomali_df)} {M['anahtar_terim'].lower()}-gün kombinasyonu, günlük eşiğin üzerinde işlem yapmış.")
                 st.dataframe(
                     siklik_anomali_df.rename(columns={
-                        "plaka": "Plaka", "gun": "Tarih", "gecis_sayisi": "Geçiş sayısı",
+                        "plaka": M["anahtar_terim"], "gun": "Tarih", "gecis_sayisi": "İşlem sayısı",
                     }),
                     use_container_width=True, hide_index=True,
                 )
@@ -599,4 +653,5 @@ if veri_hazir:
         with st.expander("Tüm kayıtları gör (uyuşan dahil)"):
             st.dataframe(sonuc_df, use_container_width=True, hide_index=True)
 else:
-    st.info("Devam etmek için sol menüden hem HGS hem de banka kayıtları CSV dosyasını yükle, ya da 'Örnek veriyle dene' butonuna tıkla.")
+    st.info(f"Devam etmek için sol menüden hem \"{M['kaynak1_etiket']}\" hem de \"{M['kaynak2_etiket']}\" "
+            f"dosyasını yükle, ya da 'Örnek veriyle dene' butonuna tıkla.")
