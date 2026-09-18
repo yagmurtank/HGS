@@ -90,6 +90,7 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
                    tutar_toleransi: float = TUTAR_TOLERANS,
                    tarih_toleransi_saat: float = TARIH_TOLERANS_SAAT,
                    kaynak_adi: str = "HGS") -> pd.DataFrame:
+    baglam = "pos" if kaynak_adi.upper() == "POS" else "hgs"
     sonuclar = []
 
     mukerrer_idler = banka["islem_id"].value_counts()
@@ -114,18 +115,21 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
                  "tutar_farki_tl": 0.0}
 
         if len(hgs_satir) == 0 and banka_var_mi:
+            sebep = olasi_sebep("HGS_TARAFINDA_YOK", 0, 0, "", baglam)
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "HGS_TARAFINDA_YOK",
-                              "detay": f"Kayıt bankada var, {kaynak_adi}'de yok"})
+                              "detay": f"Kayıt bankada var, {kaynak_adi}'de yok. {sebep}"})
             continue
 
         if len(hgs_satir) > 0 and not banka_var_mi:
+            sebep = olasi_sebep("EKSIK_KAYIT", 0, 0, "", baglam)
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "EKSIK_KAYIT",
-                              "detay": f"{kaynak_adi}'de var, bankaya hiç düşmemiş"})
+                              "detay": f"{kaynak_adi}'de var, bankaya hiç düşmemiş. {sebep}"})
             continue
 
         if islem_id in mukerrer_idler:
+            sebep = olasi_sebep("MUKERRER_KAYIT", 0, 0, "", baglam)
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "MUKERRER_KAYIT",
-                              "detay": f"Bankada {len(banka_gruplu.get_group(islem_id))} kez tekrar etmiş"})
+                              "detay": f"Bankada {len(banka_gruplu.get_group(islem_id))} kez tekrar etmiş. {sebep}"})
             continue
 
         h = hgs_satir.iloc[0]
@@ -138,12 +142,15 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
                  "hgs_tarih": h["gecis_tarihi"], "banka_tarih": b["gecis_tarihi"]}
 
         if tutar_farki > tutar_toleransi:
+            sebep = olasi_sebep("TUTAR_FARKI", tutar_farki, h["tutar"], h["gecis_tarihi"], baglam)
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "TUTAR_FARKI",
-                              "detay": f"{kaynak_adi}: {h['tutar']} TL, Banka: {b['tutar']} TL (fark: {tutar_farki} TL)",
+                              "detay": f"{kaynak_adi}: {h['tutar']} TL, Banka: {b['tutar']} TL "
+                                       f"(fark: {tutar_farki} TL). {sebep}",
                               "tutar_farki_tl": tutar_farki})
         elif tarih_farki_saat > tarih_toleransi_saat:
+            sebep = olasi_sebep("GECIKMELI_BILDIRIM", 0, 0, h["gecis_tarihi"], baglam)
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "GECIKMELI_BILDIRIM",
-                              "detay": f"Fark: {tarih_farki_saat:.1f} saat"})
+                              "detay": f"Fark: {tarih_farki_saat:.1f} saat. {sebep}"})
         else:
             sonuclar.append({**ortak, "durum": "UYUSTU", "hata_tipi": "-", "detay": "-"})
 
@@ -164,6 +171,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
     hgs["gecis_tarihi"] = pd.to_datetime(hgs["gecis_tarihi"])
     banka["gecis_tarihi"] = pd.to_datetime(banka["gecis_tarihi"])
 
+    baglam = "pos" if kaynak_adi.upper() == "POS" else "hgs"
     banka_kullanildi = [False] * len(banka)
     banka_by_plaka = {}
     for idx, row in banka.iterrows():
@@ -181,8 +189,9 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
                  "hgs_tarih": h["gecis_tarihi"].strftime("%Y-%m-%d %H:%M"), "banka_tarih": None, "tutar_farki_tl": 0.0}
 
         if not adaylar:
+            sebep = olasi_sebep("EKSIK_KAYIT", 0, 0, "", baglam)
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "EKSIK_KAYIT",
-                              "detay": f"'{h['plaka']}' değerine ait kayıt karşı tarafta bulunamadı"})
+                              "detay": f"'{h['plaka']}' değerine ait kayıt karşı tarafta bulunamadı. {sebep}"})
             continue
 
         # Aynı plakadaki adaylar arasından tarihçe en yakın olanı seç
@@ -196,12 +205,15 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
         ortak = {**temel, "banka_tutar": b["tutar"], "banka_tarih": b["gecis_tarihi"].strftime("%Y-%m-%d %H:%M")}
 
         if tutar_farki > tutar_toleransi:
+            sebep = olasi_sebep("TUTAR_FARKI", tutar_farki, h["tutar"], str(h["gecis_tarihi"]), baglam)
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "TUTAR_FARKI",
-                              "detay": f"{kaynak_adi}: {h['tutar']} TL, Banka: {b['tutar']} TL (fark: {tutar_farki} TL) — plaka+tarih ile eşleştirildi",
+                              "detay": f"{kaynak_adi}: {h['tutar']} TL, Banka: {b['tutar']} TL "
+                                       f"(fark: {tutar_farki} TL) — plaka+tarih ile eşleştirildi. {sebep}",
                               "tutar_farki_tl": tutar_farki})
         elif tarih_farki_saat > tarih_toleransi_saat:
+            sebep = olasi_sebep("GECIKMELI_BILDIRIM", 0, 0, str(h["gecis_tarihi"]), baglam)
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "GECIKMELI_BILDIRIM",
-                              "detay": f"Fark: {tarih_farki_saat:.1f} saat — plaka+tarih ile eşleştirildi"})
+                              "detay": f"Fark: {tarih_farki_saat:.1f} saat — plaka+tarih ile eşleştirildi. {sebep}"})
         else:
             sonuclar.append({**ortak, "durum": "UYUSTU", "hata_tipi": "-", "detay": "Plaka+tarih ile eşleştirildi"})
 
@@ -209,16 +221,69 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
     for idx, kullanildi in enumerate(banka_kullanildi):
         if not kullanildi:
             b = banka.loc[idx]
+            sebep = olasi_sebep("HGS_TARAFINDA_YOK", 0, 0, "", baglam)
             sonuclar.append({
                 "islem_id": b.get("islem_id", f"BANKA-{idx}"), "operator": b.get("operator", "Bilinmiyor"),
                 "gecis_noktasi": b.get("gecis_noktasi", "Bilinmiyor"), "plaka": b["plaka"],
                 "hgs_tutar": None, "banka_tutar": b["tutar"], "hgs_tarih": None,
                 "banka_tarih": b["gecis_tarihi"].strftime("%Y-%m-%d %H:%M"),
                 "tutar_farki_tl": 0.0, "durum": "UYUSMUYOR", "hata_tipi": "HGS_TARAFINDA_YOK",
-                "detay": f"'{b['plaka']}' değerine ait bu kayda diğer tarafta karşılık bulunamadı",
+                "detay": f"'{b['plaka']}' değerine ait bu kayda diğer tarafta karşılık bulunamadı. {sebep}",
             })
 
     return pd.DataFrame(sonuclar)
+
+
+def olasi_sebep(hata_tipi: str, tutar_farki: float, tutar: float, tarih_str: str, baglam: str = "hgs") -> str:
+    """
+    Hata tipine, tutar oranına ve tarihe (haftanın günü) bakarak gerçekçi bir
+    'muhtemel sebep' çıkarımı üretir. Rastgele metin değil, hesaplanan değerlere
+    dayalı kural tabanlı bir çıkarımdır - dummy veride bile mantığı gerçektir.
+    """
+    try:
+        oran = (tutar_farki / tutar * 100) if tutar else 0
+    except (TypeError, ZeroDivisionError):
+        oran = 0
+
+    if hata_tipi == "TUTAR_FARKI":
+        if baglam == "pos":
+            if 0 < oran <= 5:
+                return f"Muhtemel sebep: POS komisyonu/interchange kesintisi (~%{oran:.1f})"
+            return "Muhtemel sebep: kur farkı veya kısmi iade olabilir"
+        else:
+            if 0 < oran <= 3:
+                return "Muhtemel sebep: yuvarlama farkı veya güncellenmiş geçiş ücreti"
+            return "Muhtemel sebep: farklı araç sınıfı/tarife uygulanmış olabilir"
+
+    if hata_tipi == "GECIKMELI_BILDIRIM":
+        gun_adi = None
+        try:
+            gun_no = pd.to_datetime(tarih_str).weekday()  # Pazartesi=0 ... Pazar=6
+            gun_adi = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"][gun_no]
+            haftasonu_oncesi = gun_no in (4, 5)  # Cuma veya Cumartesi
+        except (ValueError, TypeError):
+            haftasonu_oncesi = False
+        if baglam == "pos":
+            if haftasonu_oncesi:
+                return f"Muhtemel sebep: {gun_adi} günü işlem — hafta sonu nedeniyle T+2 settlement gecikmesi"
+            return "Muhtemel sebep: standart T+1 settlement gecikmesi"
+        else:
+            return "Muhtemel sebep: HGS operatöründen bankaya toplu bildirim gecikmesi"
+
+    if hata_tipi == "EKSIK_KAYIT":
+        if baglam == "pos":
+            return "Olası sebep: authorization alınmış, capture/settlement tamamlanmamış olabilir"
+        return "Olası sebep: geçiş kaydı oluşmuş, banka bildirimi henüz yapılmamış olabilir"
+
+    if hata_tipi == "MUKERRER_KAYIT":
+        return "Olası sebep: iletişim zaman aşımı sonrası otomatik tekrar gönderim (retry)"
+
+    if hata_tipi == "HGS_TARAFINDA_YOK":
+        if baglam == "pos":
+            return "Olası sebep: bankada manuel düzeltme kaydı veya POS'a hiç yansımamış bir hareket"
+        return "Olası sebep: banka tarafında manuel düzeltme kaydı veya HGS'e hiç yansımamış bir geçiş"
+
+    return ""
 
 
 def rozet_html(hata_tipi: str) -> str:
