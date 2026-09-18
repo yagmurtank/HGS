@@ -88,7 +88,8 @@ st.markdown(
 
 def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
                    tutar_toleransi: float = TUTAR_TOLERANS,
-                   tarih_toleransi_saat: float = TARIH_TOLERANS_SAAT) -> pd.DataFrame:
+                   tarih_toleransi_saat: float = TARIH_TOLERANS_SAAT,
+                   kaynak_adi: str = "HGS") -> pd.DataFrame:
     sonuclar = []
 
     mukerrer_idler = banka["islem_id"].value_counts()
@@ -114,12 +115,12 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
 
         if len(hgs_satir) == 0 and banka_var_mi:
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "HGS_TARAFINDA_YOK",
-                              "detay": "Kayıt bankada var, HGS'de yok"})
+                              "detay": f"Kayıt bankada var, {kaynak_adi}'de yok"})
             continue
 
         if len(hgs_satir) > 0 and not banka_var_mi:
             sonuclar.append({**temel, "durum": "UYUSMUYOR", "hata_tipi": "EKSIK_KAYIT",
-                              "detay": "HGS'de var, bankaya hiç düşmemiş"})
+                              "detay": f"{kaynak_adi}'de var, bankaya hiç düşmemiş"})
             continue
 
         if islem_id in mukerrer_idler:
@@ -138,7 +139,7 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
 
         if tutar_farki > tutar_toleransi:
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "TUTAR_FARKI",
-                              "detay": f"HGS: {h['tutar']} TL, Banka: {b['tutar']} TL (fark: {tutar_farki} TL)",
+                              "detay": f"{kaynak_adi}: {h['tutar']} TL, Banka: {b['tutar']} TL (fark: {tutar_farki} TL)",
                               "tutar_farki_tl": tutar_farki})
         elif tarih_farki_saat > tarih_toleransi_saat:
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "GECIKMELI_BILDIRIM",
@@ -151,7 +152,8 @@ def mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
 
 def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
                          tutar_toleransi: float = TUTAR_TOLERANS,
-                         tarih_toleransi_saat: float = TARIH_TOLERANS_SAAT) -> pd.DataFrame:
+                         tarih_toleransi_saat: float = TARIH_TOLERANS_SAAT,
+                         kaynak_adi: str = "HGS") -> pd.DataFrame:
     """
     İşlem ID'nin iki sistemde de ortak/güvenilir olmadığı gerçek dünya senaryoları için:
     plaka + geçiş tarihi + tutar üzerinden en yakın eşleşmeyi bulan yaklaşık mutabakat motoru.
@@ -195,7 +197,7 @@ def esnek_mutabakat_yap(hgs: pd.DataFrame, banka: pd.DataFrame,
 
         if tutar_farki > tutar_toleransi:
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "TUTAR_FARKI",
-                              "detay": f"HGS: {h['tutar']} TL, Banka: {b['tutar']} TL (fark: {tutar_farki} TL) — plaka+tarih ile eşleştirildi",
+                              "detay": f"{kaynak_adi}: {h['tutar']} TL, Banka: {b['tutar']} TL (fark: {tutar_farki} TL) — plaka+tarih ile eşleştirildi",
                               "tutar_farki_tl": tutar_farki})
         elif tarih_farki_saat > tarih_toleransi_saat:
             sonuclar.append({**ortak, "durum": "UYUSMUYOR", "hata_tipi": "GECIKMELI_BILDIRIM",
@@ -353,6 +355,7 @@ MOD_BILGI = {
                               "tutar": "tutar", "gecis_noktasi": "gecis_noktasi", "operator": "operator"},
         "anahtar_terim": "Plaka", "nokta_terim": "Geçiş noktası", "operator_terim": "Operatör",
         "esnek_yontem_adi": "Plaka + Tarih + Tutar (yaklaşık)",
+        "kaynak_kisa_adi": "HGS",
         "eksik_kayit_aciklama": "plakasına ait kayıt bankada bulunamadı",
         "hgs_tarafinda_yok_aciklama": "plakasına ait bu kayda HGS tarafında karşılık bulunamadı",
     },
@@ -367,6 +370,7 @@ MOD_BILGI = {
                               "tutar": "tutar", "isyeri": "gecis_noktasi", "pos_saglayici": "operator"},
         "anahtar_terim": "Kart No", "nokta_terim": "İşyeri", "operator_terim": "POS Sağlayıcı",
         "esnek_yontem_adi": "Kart No + Tarih + Tutar (yaklaşık)",
+        "kaynak_kisa_adi": "POS",
         "eksik_kayit_aciklama": "kartına ait kayıt banka hesap hareketlerinde bulunamadı",
         "hgs_tarafinda_yok_aciklama": "kartına ait bu kayda POS tarafında karşılık bulunamadı",
     },
@@ -439,15 +443,15 @@ if veri_hazir:
 
     if eksik_hgs or eksik_banka:
         st.error(
-            f"Beklenen kolonlar eksik. HGS dosyasında eksik: {eksik_hgs or 'yok'} | "
-            f"Banka dosyasında eksik: {eksik_banka or 'yok'}"
+            f"Beklenen kolonlar eksik. \"{M['kaynak1_etiket']}\" dosyasında eksik: {eksik_hgs or 'yok'} | "
+            f"\"{M['kaynak2_etiket']}\" dosyasında eksik: {eksik_banka or 'yok'}"
         )
     else:
         with st.spinner("Mutabakat yapılıyor..."):
             if eslestirme_yontemi.startswith("İşlem ID"):
-                sonuc_df = mutabakat_yap(hgs_df, banka_df, tutar_toleransi, tarih_toleransi)
+                sonuc_df = mutabakat_yap(hgs_df, banka_df, tutar_toleransi, tarih_toleransi, M["kaynak_kisa_adi"])
             else:
-                sonuc_df = esnek_mutabakat_yap(hgs_df, banka_df, tutar_toleransi, tarih_toleransi)
+                sonuc_df = esnek_mutabakat_yap(hgs_df, banka_df, tutar_toleransi, tarih_toleransi, M["kaynak_kisa_adi"])
 
         toplam = len(sonuc_df)
         uyusan = int((sonuc_df["durum"] == "UYUSTU").sum())
@@ -554,7 +558,7 @@ if veri_hazir:
                     st.markdown(f"**{M['operator_terim']}:** {detay['operator']} — **{M['nokta_terim']}:** {detay['gecis_noktasi']}")
                 with d2:
                     if pd.notna(detay.get("hgs_tutar")):
-                        st.markdown(f"**HGS tutar / tarih:** {detay['hgs_tutar']} TL — {detay['hgs_tarih']}")
+                        st.markdown(f"**{M['kaynak_kisa_adi']} tutar / tarih:** {detay['hgs_tutar']} TL — {detay['hgs_tarih']}")
                         st.markdown(f"**Banka tutar / tarih:** {detay['banka_tutar']} TL — {detay['banka_tarih']}")
                 st.markdown(f"**Açıklama:** {detay['detay']}")
                 st.markdown("</div>", unsafe_allow_html=True)
